@@ -101,9 +101,9 @@ hash_t *hash_insertar(hash_t *hash, const char *clave, void *elemento,
 	if (!hash || !clave || !hash->vector)
 		return NULL;
 	size_t posicion = funcion_hash(clave) % hash->capacidad;
-	//float factor_carga = (float)hash->cantidad / (float)hash->capacidad;
-	//if(factor_carga > FACTOR_CARGA_MAXIMO)
-    	//rehashear(hash);
+	float factor_carga = (float)hash->cantidad / (float)hash->capacidad;
+	if(factor_carga > FACTOR_CARGA_MAXIMO)
+    	rehashear(hash);
 	//si el lugar esta vacio
 	if(!hash->vector[posicion]){
 		struct nodo* nuevo_nodo = nodo_crear(clave, elemento);
