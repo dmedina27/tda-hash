@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "hash.h"
 
@@ -27,7 +28,7 @@ hash_t *hash_crear(size_t capacidad)
 	if(capacidad < CAPACIDAD_MINIMA)
 		nuevo_hash->capacidad = CAPACIDAD_MINIMA;
 	nuevo_hash->cantidad = 0;
-	nuevo_hash->vector = malloc(sizeof(struct nodo*)*capacidad);
+	nuevo_hash->vector = calloc(1,sizeof(struct nodo*)*capacidad);
 	if(!nuevo_hash->vector){
 		free(nuevo_hash);
 		return NULL;
@@ -46,11 +47,33 @@ size_t funcion_hash(const char *str)
         hash = ((hash << 5) + hash) + c;
     return hash;
 }
+
+void destruir_copia_string(void *elemento)
+{
+	if (!elemento)
+		return;
+	free(elemento);
+}
+
+char *crear_copia_string(const char *s)
+{
+	if (!s)
+		return NULL;
+
+	char *p = malloc(strlen(s) + 1);
+	if (!p)
+		return NULL;
+
+	strcpy(p, s);
+	return p;
+}
+
 /*
 *	funcion que dada una clave y un valor 
 *	reserva memoria y genera un nodo con dichos elementos guardados
 *	y su direccion siguiente en NULL
 *	con la particularidad que genera una copia de la clave
+*	(crear_copia_string siempre recibe un string valido)
 *	los parametros tienen que ser validos
 *	devuelve el nodo o NULL en caso de error
 */
@@ -59,13 +82,7 @@ struct nodo* nodo_crear(const char* clave, void* valor){
     if(!nuevo_nodo){
         return NULL;
     }
-    //me guardo una copia del string
-    //size_t tamanio_clave = strlen(clave);
-    //char copia_clave[tamanio_clave];
-    //strcpy(copia_clave,clave);
-    //nuevo_nodo->clave = copia_clave;
-    
-	nuevo_nodo->clave = clave;
+	nuevo_nodo->clave = crear_copia_string(clave);
 	nuevo_nodo->valor = valor;
     nuevo_nodo->siguiente = NULL;
     return nuevo_nodo;
@@ -77,22 +94,42 @@ struct nodo* nodo_crear(const char* clave, void* valor){
 *	liberando el vector antiguo y devolviendo el hash actualizado
 *	el parametro tiene que ser valido
 */
-hash_t* rehashear(hash_t* hash){
-    struct nodo** vector_viejo = hash->vector;
-    hash->vector = malloc(sizeof(hash->capacidad)*2);
-    hash->capacidad *= 2;
-    hash->cantidad = 0;
-    //copio todos los elementos
-    for(int i = 0; i < hash->capacidad; i++){
-        struct nodo *actual = vector_viejo[i];
-        while(actual){
-            hash_insertar(hash,actual->clave,actual->valor,NULL);
-            actual = actual->siguiente;
+hash_t* rehash(hash_t* hash)
+{
+    size_t nueva_capacidad = hash->capacidad * 2;
+    struct nodo** nuevo_vector = calloc(nueva_capacidad, sizeof(struct nodo*));
+    if (!nuevo_vector)
+        return NULL;
+    for (size_t i = 0; i < hash->capacidad; i++) {
+        struct nodo* actual = hash->vector[i];
+        while (actual != NULL) {
+            struct nodo* siguiente = actual->siguiente;
+            // Se recalcula la posición del nodo en el nuevo vector
+            size_t nueva_posicion = funcion_hash(actual->clave) % nueva_capacidad;   
+            // Si la nueva posición del nodo no tiene colisiones, se inserta como primer elemento de la lista
+            if (nuevo_vector[nueva_posicion] == NULL) {
+				struct nodo* aux = actual->siguiente;
+                nuevo_vector[nueva_posicion] = actual;
+                actual->siguiente = NULL;
+				actual = aux;
+            }
+            // Si la nueva posición del nodo tiene colisiones, se inserta como último elemento de la lista
+            else {
+                struct nodo* ultimo = nuevo_vector[nueva_posicion];
+               while (ultimo->siguiente != NULL)
+                    ultimo = ultimo->siguiente;
+                ultimo->siguiente = actual;
+                actual->siguiente = NULL;
+            }
+            actual = siguiente;
         }
     }
-    free(vector_viejo);
+    free(hash->vector);
+    hash->vector = nuevo_vector;
+    hash->capacidad = nueva_capacidad;
     return hash;
 }
+
 
 
 hash_t *hash_insertar(hash_t *hash, const char *clave, void *elemento,
@@ -101,9 +138,9 @@ hash_t *hash_insertar(hash_t *hash, const char *clave, void *elemento,
 	if (!hash || !clave || !hash->vector)
 		return NULL;
 	size_t posicion = funcion_hash(clave) % hash->capacidad;
-	float factor_carga = (float)hash->cantidad / (float)hash->capacidad;
+	size_t factor_carga = (size_t)hash->cantidad / (size_t)hash->capacidad;
 	if(factor_carga > FACTOR_CARGA_MAXIMO)
-    	rehashear(hash);
+    	hash = rehash(hash);
 	//si el lugar esta vacio
 	if(!hash->vector[posicion]){
 		struct nodo* nuevo_nodo = nodo_crear(clave, elemento);
@@ -160,6 +197,7 @@ void *hash_quitar(hash_t *hash, const char *clave)
 		else {
 			anterior->siguiente = actual->siguiente;
 		}
+		destruir_copia_string((void*)actual->clave);
 		free(actual);
 		hash->cantidad--;
 		return valor;
@@ -206,22 +244,18 @@ void hash_destruir(hash_t *hash)
 
 void hash_destruir_todo(hash_t *hash, void (*destructor)(void *))
 {
-	if (!hash)
+	if (!hash || !hash->vector)
 		return;
-	if(!hash->vector){
-		free(hash);
-		return ;
-	}
 	for(int i = 0; i < hash->capacidad;i++){
-		if(hash->vector[i]){
 			struct nodo* actual = hash->vector[i];
 			while(actual){
 				struct nodo* nodo_a_liberar = actual;
 				actual = actual->siguiente;
-				if(destructor)
+				if(destructor){
 					destructor(nodo_a_liberar->valor);
+				}
+				destruir_copia_string((void*)nodo_a_liberar->clave);
 				free(nodo_a_liberar);
-			}
 		}
 	}
 	free(hash->vector);
@@ -238,9 +272,9 @@ size_t hash_con_cada_clave(hash_t *hash,
 	for(int i = 0; i < hash->capacidad;i++){
 		struct nodo* actual = hash->vector[i];
 		while(actual){
+			n++;
 			if(!f(actual->clave,actual->valor, aux))
 				return n;
-			n++;
 			actual = actual->siguiente;
 		}
 	}
