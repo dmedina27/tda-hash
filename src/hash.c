@@ -266,17 +266,17 @@ size_t hash_con_cada_clave(hash_t *hash,
 			   bool (*f)(const char *clave, void *valor, void *aux),
 			   void *aux)
 {
-	size_t n = 0;
+	size_t cantidad_recorrido = 0;
 	if (!hash || !f)
-		return n;
+		return cantidad_recorrido;
 	for(int i = 0; i < hash->capacidad;i++){
 		struct nodo* actual = hash->vector[i];
 		while(actual){
-			n++;
+			cantidad_recorrido++;
 			if(!f(actual->clave,actual->valor, aux))
-				return n;
+				return cantidad_recorrido;
 			actual = actual->siguiente;
 		}
 	}
-	return n;
+	return cantidad_recorrido;
 }
